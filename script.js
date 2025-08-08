@@ -1,8 +1,8 @@
 // Security Configuration
 const SECURITY_CONFIG = {
     validTokens: ["TOKEN-123", "TOKEN-456", "TOKEN-789"],
-    lootlabsUrl: "https://lootlabs.net/link/placeholder",
-    robloxEventUrl: "https://www.roblox.com/games/123456789/Event-Game",
+    lootlabsUrl: "https://lootlabs.net/placeholder-will-update-later", // Replace with your LootLabs campaign link
+    robloxEventUrl: "https://www.roblox.com/games/placeholder/Event-Game", // Replace with your actual game link
     discordUrl: "https://discord.gg/dyGvnnymbHj",
     maxAttempts: 3,
     sessionTimeout: 86400000 // 24 hours
@@ -23,39 +23,26 @@ let securityState = {
 document.addEventListener('DOMContentLoaded', function() {
     initializeSecurity();
     initializePageLogic();
-    startSecurityMonitoring();
     updateTimestamps();
 });
 
-// Security Functions
+// BALANCED Security - Less aggressive but still protective
 function initializeSecurity() {
-    detectDevTools();
+    // Basic protection
     document.addEventListener('contextmenu', e => e.preventDefault());
     document.addEventListener('keydown', handleKeyDown);
     
+    // DevTools detection (less aggressive - only warns, doesn't auto-redirect)
+    detectDevToolsBalanced();
+    
+    // Check for URL token parameters
     if (window.location.pathname.includes('redirect.html')) {
-        validateReferrer();
+        checkUrlToken();
+        validateAccess();
     }
     
-    detectAutomation();
-    validateSession();
-}
-
-function detectDevTools() {
-    const threshold = 160;
-    
-    function check() {
-        if (window.outerHeight - window.innerHeight > threshold || 
-            window.outerWidth - window.innerWidth > threshold) {
-            if (!securityState.devToolsDetected) {
-                securityState.devToolsDetected = true;
-                logSecurityEvent('DevTools detected');
-                handleSecurityViolation('devtools');
-            }
-        }
-    }
-    
-    setInterval(check, 1000);
+    // Monitor for obvious automation
+    detectObviousAutomation();
 }
 
 function handleKeyDown(e) {
@@ -70,69 +57,71 @@ function handleKeyDown(e) {
     }
 }
 
-function validateReferrer() {
-    const validReferrers = [
-        'https://lootlabs.net',
-        window.location.origin
-    ];
+// Balanced DevTools detection - doesn't auto-redirect
+function detectDevToolsBalanced() {
+    const threshold = 160;
+    let warningShown = false;
     
-    const referrer = document.referrer;
-    if (!referrer) {
-        logSecurityEvent('No referrer detected');
-        return;
-    }
-    
-    let isValidReferrer = false;
-    for (let validRef of validReferrers) {
-        if (referrer.startsWith(validRef)) {
-            isValidReferrer = true;
-            break;
+    function check() {
+        if (window.outerHeight - window.innerHeight > threshold || 
+            window.outerWidth - window.innerWidth > threshold) {
+            if (!securityState.devToolsDetected) {
+                securityState.devToolsDetected = true;
+                logSecurityEvent('DevTools potentially detected');
+                
+                // Only show warning, don't auto-redirect
+                if (!warningShown && Math.random() > 0.5) {
+                    console.warn('⚠️ Please close developer tools for the best experience');
+                    warningShown = true;
+                }
+            }
         }
     }
     
-    if (!isValidReferrer) {
-        logSecurityEvent('Invalid referrer: ' + referrer);
-        redirectToBypass('Invalid referrer detected');
-    }
+    // Check less frequently
+    setInterval(check, 5000);
 }
 
-function detectAutomation() {
+// Only detect obvious automation (not normal users)
+function detectObviousAutomation() {
     if (navigator.webdriver || 
         window.phantom || 
         window.callPhantom ||
-        window._phantom ||
-        window.Buffer ||
-        window.emit ||
-        window.spawn) {
-        logSecurityEvent('Automation detected');
+        window._phantom) {
+        logSecurityEvent('Obvious automation detected');
         handleSecurityViolation('automation');
     }
-    
-    let mouseEvents = 0;
-    document.addEventListener('mousemove', () => {
-        mouseEvents++;
-    });
-    
-    setTimeout(() => {
-        if (mouseEvents === 0) {
-            logSecurityEvent('No mouse activity detected');
-            securityState.suspiciousActivity = true;
-        }
-    }, 5000);
 }
 
-function validateSession() {
-    const sessionData = localStorage.getItem('eventSession');
-    if (sessionData) {
-        try {
-            const session = JSON.parse(sessionData);
-            if (Date.now() - session.created > SECURITY_CONFIG.sessionTimeout) {
-                localStorage.removeItem('eventSession');
-                logSecurityEvent('Session expired');
+// Validate access but be less strict
+function validateAccess() {
+    const referrer = document.referrer;
+    
+    // Only block if COMPLETELY invalid referrer AND suspicious activity
+    if (!referrer && securityState.devToolsDetected && securityState.suspiciousActivity) {
+        logSecurityEvent('Multiple security concerns detected');
+        setTimeout(() => {
+            if (Math.random() > 0.7) { // Only 30% chance to redirect
+                redirectToBypass('Multiple security violations detected');
             }
-        } catch (e) {
-            localStorage.removeItem('eventSession');
-            logSecurityEvent('Invalid session data');
+        }, 10000); // Wait 10 seconds before checking
+    }
+}
+
+// Check for token in URL (from LootLabs redirect)
+function checkUrlToken() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    
+    if (token) {
+        // Auto-fill the token input
+        const tokenInput = document.getElementById('accessToken');
+        if (tokenInput) {
+            tokenInput.value = token.toUpperCase();
+            // Auto-validate after a short delay
+            setTimeout(() => {
+                validateAccessToken();
+            }, 1000);
         }
     }
 }
@@ -144,6 +133,7 @@ function generateSessionId() {
 function logSecurityEvent(event) {
     console.log(`[SECURITY] ${new Date().toISOString()}: ${event}`);
     
+    // Store security events but don't let them trigger auto-redirects
     const events = JSON.parse(localStorage.getItem('securityEvents') || '[]');
     events.push({
         timestamp: new Date().toISOString(),
@@ -163,16 +153,16 @@ function handleSecurityViolation(type) {
     securityState.suspiciousActivity = true;
     
     switch (type) {
-        case 'devtools':
-            if (Math.random() > 0.7) {
-                redirectToBypass('DevTools usage detected');
-            }
-            break;
         case 'automation':
+            // Only redirect for obvious automation
             redirectToBypass('Automated access detected');
             break;
-        case 'referrer':
-            redirectToBypass('Invalid access method');
+        case 'devtools':
+            // Don't auto-redirect for DevTools anymore
+            logSecurityEvent('DevTools usage noted');
+            break;
+        case 'excessive-attempts':
+            redirectToBypass('Too many failed attempts');
             break;
     }
 }
@@ -218,11 +208,6 @@ function initializeIndexPage() {
                 this.style.transform = '';
             }, 150);
             
-            if (securityState.suspiciousActivity) {
-                redirectToBypass('Suspicious activity detected');
-                return;
-            }
-            
             // Create session
             const sessionData = {
                 created: Date.now(),
@@ -237,13 +222,10 @@ function initializeIndexPage() {
             this.innerHTML = '<span>Opening Verification...</span>';
             this.disabled = true;
             
-            // Open LootLabs in new tab
-            window.open(SECURITY_CONFIG.lootlabsUrl, '_blank');
-            
-            // Redirect to verification page
+            // Redirect to LootLabs
             setTimeout(() => {
-                window.location.href = 'redirect.html';
-            }, 2000);
+                window.location.href = SECURITY_CONFIG.lootlabsUrl;
+            }, 1500);
         });
     }
 }
@@ -310,7 +292,7 @@ function validateAccessToken() {
     securityState.attempts++;
     if (securityState.attempts > SECURITY_CONFIG.maxAttempts) {
         logSecurityEvent('Too many validation attempts');
-        redirectToBypass('Too many failed attempts');
+        handleSecurityViolation('excessive-attempts');
         return;
     }
     
@@ -326,7 +308,7 @@ function validateAccessToken() {
             
             if (securityState.attempts >= SECURITY_CONFIG.maxAttempts) {
                 setTimeout(() => {
-                    redirectToBypass('Maximum attempts exceeded');
+                    handleSecurityViolation('excessive-attempts');
                 }, 2000);
             }
         }
@@ -382,7 +364,9 @@ function showSuccess(token) {
     localStorage.setItem('eventSession', JSON.stringify(sessionData));
     
     // Add success animation
-    successSection.style.animation = 'successSlide 0.8s cubic-bezier(0.4, 0, 0.2, 1)';
+    if (successSection) {
+        successSection.style.animation = 'successSlide 0.8s cubic-bezier(0.4, 0, 0.2, 1)';
+    }
 }
 
 function showError(message) {
@@ -489,7 +473,7 @@ function updateSessionInfo() {
     const userLoginEl = document.getElementById('userLogin');
     
     if (timestampEl) {
-        timestampEl.textContent = new Date().toISOString().replace('T', ' ').split('.')[0] + ' UTC';
+        timestampEl.textContent = '2025-08-08 09:52:42 UTC';
     }
     
     if (userAgentEl) {
@@ -525,8 +509,7 @@ function animateViolations() {
 
 // Update timestamps throughout the site
 function updateTimestamps() {
-    const now = new Date();
-    const utcString = now.toISOString().replace('T', ' ').split('.')[0] + ' UTC';
+    const utcString = '2025-08-08 09:52:42 UTC';
     
     // Update any timestamp elements
     const timestampElements = document.querySelectorAll('[id*="timestamp"], .timestamp');
@@ -536,101 +519,6 @@ function updateTimestamps() {
         }
     });
 }
-
-// Security Monitoring
-function startSecurityMonitoring() {
-    let clickCount = 0;
-    let rapidClicks = 0;
-    
-    document.addEventListener('click', function(e) {
-        clickCount++;
-        rapidClicks++;
-        
-        // Add click effect to buttons
-        if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
-            const btn = e.target.tagName === 'BUTTON' ? e.target : e.target.closest('button');
-            btn.style.transform = 'scale(0.98)';
-            setTimeout(() => {
-                btn.style.transform = '';
-            }, 150);
-        }
-        
-        setTimeout(() => {
-            rapidClicks = 0;
-        }, 1000);
-        
-        if (rapidClicks > 10) {
-            logSecurityEvent('Rapid clicking detected');
-            securityState.suspiciousActivity = true;
-        }
-    });
-    
-    document.addEventListener('visibilitychange', function() {
-        if (document.hidden) {
-            logSecurityEvent('Tab hidden');
-        } else {
-            logSecurityEvent('Tab visible');
-        }
-    });
-    
-    window.addEventListener('focus', function() {
-        logSecurityEvent('Window focused');
-    });
-    
-    window.addEventListener('blur', function() {
-        logSecurityEvent('Window blurred');
-    });
-    
-    setInterval(performSecurityCheck, 30000);
-}
-
-function performSecurityCheck() {
-    const scripts = document.querySelectorAll('script');
-    const expectedScripts = ['script.js'];
-    
-    scripts.forEach(script => {
-        if (script.src && !expectedScripts.some(expected => script.src.includes(expected))) {
-            logSecurityEvent('Unexpected script detected: ' + script.src);
-            handleSecurityViolation('script-injection');
-        }
-    });
-    
-    try {
-        const testData = localStorage.getItem('securityEvents');
-        if (testData) {
-            JSON.parse(testData);
-        }
-    } catch (e) {
-        logSecurityEvent('Local storage corruption detected');
-        localStorage.clear();
-    }
-}
-
-// Anti-debugging measures
-(() => {
-    let devtools = false;
-    let threshold = 160;
-    
-    function detectDevTools() {
-        if (window.outerHeight - window.innerHeight > threshold || 
-            window.outerWidth - window.innerWidth > threshold) {
-            devtools = true;
-        }
-    }
-    
-    function randomDelay() {
-        return Math.floor(Math.random() * 1000) + 500;
-    }
-    
-    setInterval(() => {
-        detectDevTools();
-        if (devtools && Math.random() > 0.8) {
-            if (window.location.pathname !== '/bypass.html') {
-                redirectToBypass('DevTools detected during monitoring');
-            }
-        }
-    }, randomDelay());
-})();
 
 // Initialize security logging
 logSecurityEvent('Security system initialized for user: SL1YYY');
