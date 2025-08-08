@@ -4,16 +4,13 @@ const SECURITY_CONFIG = {
     lootlabsUrl: "https://lootlabs.net/placeholder-will-update-later", // Replace with your LootLabs campaign link
     robloxEventUrl: "https://www.roblox.com/games/placeholder/Event-Game", // Replace with your actual game link
     discordUrl: "https://discord.gg/dyGvnnymbHj",
-    maxAttempts: 3,
+    maxAttempts: 5,
     sessionTimeout: 86400000 // 24 hours
 };
 
 // Security State
 let securityState = {
     attempts: 0,
-    blocked: false,
-    devToolsDetected: false,
-    suspiciousActivity: false,
     sessionId: generateSessionId(),
     userAgent: navigator.userAgent,
     timestamp: new Date().toISOString()
@@ -21,91 +18,83 @@ let securityState = {
 
 // Initialize everything when DOM loads
 document.addEventListener('DOMContentLoaded', function() {
-    initializeSecurity();
+    initializeBasicSecurity();
     initializePageLogic();
     updateTimestamps();
 });
 
-// BALANCED Security - Less aggressive but still protective
-function initializeSecurity() {
+// BALANCED Security - Protects against bypassing but not overly aggressive
+function initializeBasicSecurity() {
     // Basic protection
     document.addEventListener('contextmenu', e => e.preventDefault());
-    document.addEventListener('keydown', handleKeyDown);
     
-    // DevTools detection (less aggressive - only warns, doesn't auto-redirect)
-    detectDevToolsBalanced();
+    // Block common dev shortcuts
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'F12' || 
+            (e.ctrlKey && e.shiftKey && e.key === 'I') ||
+            (e.ctrlKey && e.key === 'u')) {
+            e.preventDefault();
+            logSecurityEvent('Blocked shortcut: ' + e.key);
+        }
+    });
     
-    // Check for URL token parameters
+    // IMPORTANT: Check referrer on redirect page to prevent bypassing
     if (window.location.pathname.includes('redirect.html')) {
+        validateReferrer();
         checkUrlToken();
-        validateAccess();
-    }
-    
-    // Monitor for obvious automation
-    detectObviousAutomation();
-}
-
-function handleKeyDown(e) {
-    if (e.key === 'F12' || 
-        (e.ctrlKey && e.shiftKey && e.key === 'I') ||
-        (e.ctrlKey && e.shiftKey && e.key === 'C') ||
-        (e.ctrlKey && e.key === 'u') ||
-        (e.ctrlKey && e.key === 's')) {
-        e.preventDefault();
-        logSecurityEvent('Blocked keyboard shortcut: ' + e.key);
-        return false;
     }
 }
 
-// Balanced DevTools detection - doesn't auto-redirect
-function detectDevToolsBalanced() {
-    const threshold = 160;
-    let warningShown = false;
+// Prevent direct access to redirect.html (bypass protection)
+function validateReferrer() {
+    const referrer = document.referrer;
+    const currentDomain = window.location.origin;
     
-    function check() {
-        if (window.outerHeight - window.innerHeight > threshold || 
-            window.outerWidth - window.innerWidth > threshold) {
-            if (!securityState.devToolsDetected) {
-                securityState.devToolsDetected = true;
-                logSecurityEvent('DevTools potentially detected');
-                
-                // Only show warning, don't auto-redirect
-                if (!warningShown && Math.random() > 0.5) {
-                    console.warn('⚠️ Please close developer tools for the best experience');
-                    warningShown = true;
-                }
+    // Allow if coming from LootLabs, your own site, or has valid session
+    const validReferrers = [
+        'lootlabs',
+        'loot-link', 
+        'loot-labs',
+        currentDomain
+    ];
+    
+    let isValidAccess = false;
+    
+    // Check if referrer is valid
+    if (referrer) {
+        for (let valid of validReferrers) {
+            if (referrer.toLowerCase().includes(valid)) {
+                isValidAccess = true;
+                break;
             }
         }
     }
     
-    // Check less frequently
-    setInterval(check, 5000);
-}
-
-// Only detect obvious automation (not normal users)
-function detectObviousAutomation() {
-    if (navigator.webdriver || 
-        window.phantom || 
-        window.callPhantom ||
-        window._phantom) {
-        logSecurityEvent('Obvious automation detected');
-        handleSecurityViolation('automation');
-    }
-}
-
-// Validate access but be less strict
-function validateAccess() {
-    const referrer = document.referrer;
-    
-    // Only block if COMPLETELY invalid referrer AND suspicious activity
-    if (!referrer && securityState.devToolsDetected && securityState.suspiciousActivity) {
-        logSecurityEvent('Multiple security concerns detected');
-        setTimeout(() => {
-            if (Math.random() > 0.7) { // Only 30% chance to redirect
-                redirectToBypass('Multiple security violations detected');
+    // Also check for existing valid session
+    const sessionData = localStorage.getItem('eventSession');
+    if (sessionData) {
+        try {
+            const session = JSON.parse(sessionData);
+            if (session.created && Date.now() - session.created < 300000) { // 5 minutes
+                isValidAccess = true;
             }
-        }, 10000); // Wait 10 seconds before checking
+        } catch (e) {
+            // Invalid session data
+        }
     }
+    
+    // Redirect to bypass if direct access detected
+    if (!isValidAccess) {
+        logSecurityEvent('Direct access to redirect page detected - Referrer: ' + (referrer || 'None'));
+        localStorage.setItem('bypassReason', 'Direct access detected. Please use the proper verification process.');
+        setTimeout(() => {
+            window.location.href = 'bypass.html';
+        }, 2000);
+        return false;
+    }
+    
+    logSecurityEvent('Valid access to redirect page - Referrer: ' + referrer);
+    return true;
 }
 
 // Check for token in URL (from LootLabs redirect)
@@ -131,46 +120,21 @@ function generateSessionId() {
 }
 
 function logSecurityEvent(event) {
-    console.log(`[SECURITY] ${new Date().toISOString()}: ${event}`);
+    console.log(`[SECURITY] 2025-08-08 10:02:07: ${event}`);
     
-    // Store security events but don't let them trigger auto-redirects
+    // Store events for debugging
     const events = JSON.parse(localStorage.getItem('securityEvents') || '[]');
     events.push({
-        timestamp: new Date().toISOString(),
+        timestamp: '2025-08-08 10:02:07',
         event: event,
-        userAgent: navigator.userAgent,
         url: window.location.href
     });
     
-    if (events.length > 50) {
-        events.splice(0, events.length - 50);
+    if (events.length > 20) {
+        events.splice(0, events.length - 20);
     }
     
     localStorage.setItem('securityEvents', JSON.stringify(events));
-}
-
-function handleSecurityViolation(type) {
-    securityState.suspiciousActivity = true;
-    
-    switch (type) {
-        case 'automation':
-            // Only redirect for obvious automation
-            redirectToBypass('Automated access detected');
-            break;
-        case 'devtools':
-            // Don't auto-redirect for DevTools anymore
-            logSecurityEvent('DevTools usage noted');
-            break;
-        case 'excessive-attempts':
-            redirectToBypass('Too many failed attempts');
-            break;
-    }
-}
-
-function redirectToBypass(reason) {
-    logSecurityEvent('Redirecting to bypass page: ' + reason);
-    localStorage.setItem('bypassReason', reason);
-    window.location.href = 'bypass.html';
 }
 
 // Page-specific Logic
@@ -208,7 +172,7 @@ function initializeIndexPage() {
                 this.style.transform = '';
             }, 150);
             
-            // Create session
+            // Create session for validation
             const sessionData = {
                 created: Date.now(),
                 sessionId: securityState.sessionId,
@@ -248,7 +212,6 @@ function initializeRedirectPage() {
         });
         
         tokenInput.addEventListener('input', function() {
-            // Clear any error states when user starts typing
             const errorSection = document.getElementById('errorSection');
             if (errorSection && !errorSection.classList.contains('hidden')) {
                 errorSection.classList.add('hidden');
@@ -261,7 +224,6 @@ function initializeRedirectPage() {
             const link = this.getAttribute('data-link');
             if (link && link !== '') {
                 logSecurityEvent('User accessed event');
-                // Add click animation
                 this.style.transform = 'scale(0.98)';
                 setTimeout(() => {
                     this.style.transform = '';
@@ -271,7 +233,6 @@ function initializeRedirectPage() {
         });
     }
     
-    // Auto-focus token input
     if (tokenInput) {
         setTimeout(() => tokenInput.focus(), 500);
     }
@@ -288,11 +249,13 @@ function validateAccessToken() {
         return;
     }
     
-    // Check attempts
     securityState.attempts++;
     if (securityState.attempts > SECURITY_CONFIG.maxAttempts) {
-        logSecurityEvent('Too many validation attempts');
-        handleSecurityViolation('excessive-attempts');
+        logSecurityEvent('Too many attempts - redirecting to bypass');
+        localStorage.setItem('bypassReason', 'Too many failed verification attempts.');
+        setTimeout(() => {
+            window.location.href = 'bypass.html';
+        }, 2000);
         return;
     }
     
@@ -305,12 +268,6 @@ function validateAccessToken() {
         } else {
             showError('Invalid token. Please check your token and try again.');
             logSecurityEvent('Invalid token attempt: ' + token);
-            
-            if (securityState.attempts >= SECURITY_CONFIG.maxAttempts) {
-                setTimeout(() => {
-                    handleSecurityViolation('excessive-attempts');
-                }, 2000);
-            }
         }
     }, 2000);
 }
@@ -352,8 +309,7 @@ function showSuccess(token) {
     }
     
     if (expiryTime) {
-        const expiry = new Date(Date.now() + SECURITY_CONFIG.sessionTimeout);
-        expiryTime.textContent = expiry.toISOString().replace('T', ' ').split('.')[0] + ' UTC';
+        expiryTime.textContent = '2025-08-09 10:02:07 UTC';
     }
     
     // Store successful validation
@@ -363,7 +319,6 @@ function showSuccess(token) {
     sessionData.validatedAt = Date.now();
     localStorage.setItem('eventSession', JSON.stringify(sessionData));
     
-    // Add success animation
     if (successSection) {
         successSection.style.animation = 'successSlide 0.8s cubic-bezier(0.4, 0, 0.2, 1)';
     }
@@ -434,7 +389,6 @@ function initializeBypassPage() {
     
     if (goHomeBtn) {
         goHomeBtn.addEventListener('click', function() {
-            // Add click animation
             this.style.transform = 'scale(0.98)';
             setTimeout(() => {
                 localStorage.clear();
@@ -445,7 +399,6 @@ function initializeBypassPage() {
     
     if (contactSupportBtn) {
         contactSupportBtn.addEventListener('click', function() {
-            // Add click animation
             this.style.transform = 'scale(0.98)';
             setTimeout(() => {
                 this.style.transform = '';
@@ -463,7 +416,6 @@ function initializeBypassPage() {
     }
     
     localStorage.removeItem('eventSession');
-    animateViolations();
 }
 
 function updateSessionInfo() {
@@ -473,7 +425,7 @@ function updateSessionInfo() {
     const userLoginEl = document.getElementById('userLogin');
     
     if (timestampEl) {
-        timestampEl.textContent = '2025-08-08 09:52:42 UTC';
+        timestampEl.textContent = '2025-08-08 10:02:07 UTC';
     }
     
     if (userAgentEl) {
@@ -497,21 +449,10 @@ function updateSessionInfo() {
     }
 }
 
-function animateViolations() {
-    const violations = document.querySelectorAll('.violation-list .step-card');
-    violations.forEach((violation, index) => {
-        setTimeout(() => {
-            violation.style.opacity = '1';
-            violation.style.transform = 'translateX(0)';
-        }, index * 200);
-    });
-}
-
 // Update timestamps throughout the site
 function updateTimestamps() {
-    const utcString = '2025-08-08 09:52:42 UTC';
+    const utcString = '2025-08-08 10:02:07 UTC';
     
-    // Update any timestamp elements
     const timestampElements = document.querySelectorAll('[id*="timestamp"], .timestamp');
     timestampElements.forEach(el => {
         if (el.textContent.includes('UTC') || el.textContent.includes('2025')) {
