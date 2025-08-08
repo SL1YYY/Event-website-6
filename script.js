@@ -1,16 +1,19 @@
 // Security Configuration
 const SECURITY_CONFIG = {
     validTokens: ["TOKEN-123", "TOKEN-456", "TOKEN-789"],
-    lootlabsUrl: "https://lootlabs.net/placeholder-will-update-later", // Replace with your LootLabs campaign link
-    robloxEventUrl: "https://www.roblox.com/games/placeholder/Event-Game", // Replace with your actual game link
+    lootlabsUrl: "https://lootlabs.net/link/placeholder",
+    robloxEventUrl: "https://www.roblox.com/games/123456789/Event-Game",
     discordUrl: "https://discord.gg/dyGvnnymbHj",
-    maxAttempts: 5,
+    maxAttempts: 3,
     sessionTimeout: 86400000 // 24 hours
 };
 
 // Security State
 let securityState = {
     attempts: 0,
+    blocked: false,
+    devToolsDetected: false,
+    suspiciousActivity: false,
     sessionId: generateSessionId(),
     userAgent: navigator.userAgent,
     timestamp: new Date().toISOString()
@@ -18,99 +21,118 @@ let securityState = {
 
 // Initialize everything when DOM loads
 document.addEventListener('DOMContentLoaded', function() {
-    initializeBasicSecurity();
+    initializeSecurity();
     initializePageLogic();
+    startSecurityMonitoring();
     updateTimestamps();
 });
 
-// BALANCED Security - Protects against bypassing but not overly aggressive
-function initializeBasicSecurity() {
-    // Basic protection
+// Security Functions
+function initializeSecurity() {
+    detectDevTools();
     document.addEventListener('contextmenu', e => e.preventDefault());
+    document.addEventListener('keydown', handleKeyDown);
     
-    // Block common dev shortcuts
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'F12' || 
-            (e.ctrlKey && e.shiftKey && e.key === 'I') ||
-            (e.ctrlKey && e.key === 'u')) {
-            e.preventDefault();
-            logSecurityEvent('Blocked shortcut: ' + e.key);
-        }
-    });
-    
-    // IMPORTANT: Check referrer on redirect page to prevent bypassing
     if (window.location.pathname.includes('redirect.html')) {
         validateReferrer();
-        checkUrlToken();
     }
+    
+    detectAutomation();
+    validateSession();
 }
 
-// Prevent direct access to redirect.html (bypass protection)
-function validateReferrer() {
-    const referrer = document.referrer;
-    const currentDomain = window.location.origin;
+function detectDevTools() {
+    const threshold = 160;
     
-    // Allow if coming from LootLabs, your own site, or has valid session
-    const validReferrers = [
-        'lootlabs',
-        'loot-link', 
-        'loot-labs',
-        currentDomain
-    ];
-    
-    let isValidAccess = false;
-    
-    // Check if referrer is valid
-    if (referrer) {
-        for (let valid of validReferrers) {
-            if (referrer.toLowerCase().includes(valid)) {
-                isValidAccess = true;
-                break;
+    function check() {
+        if (window.outerHeight - window.innerHeight > threshold || 
+            window.outerWidth - window.innerWidth > threshold) {
+            if (!securityState.devToolsDetected) {
+                securityState.devToolsDetected = true;
+                logSecurityEvent('DevTools detected');
+                handleSecurityViolation('devtools');
             }
         }
     }
     
-    // Also check for existing valid session
+    setInterval(check, 1000);
+}
+
+function handleKeyDown(e) {
+    if (e.key === 'F12' || 
+        (e.ctrlKey && e.shiftKey && e.key === 'I') ||
+        (e.ctrlKey && e.shiftKey && e.key === 'C') ||
+        (e.ctrlKey && e.key === 'u') ||
+        (e.ctrlKey && e.key === 's')) {
+        e.preventDefault();
+        logSecurityEvent('Blocked keyboard shortcut: ' + e.key);
+        return false;
+    }
+}
+
+function validateReferrer() {
+    const validReferrers = [
+        'https://lootlabs.net',
+        window.location.origin
+    ];
+    
+    const referrer = document.referrer;
+    if (!referrer) {
+        logSecurityEvent('No referrer detected');
+        return;
+    }
+    
+    let isValidReferrer = false;
+    for (let validRef of validReferrers) {
+        if (referrer.startsWith(validRef)) {
+            isValidReferrer = true;
+            break;
+        }
+    }
+    
+    if (!isValidReferrer) {
+        logSecurityEvent('Invalid referrer: ' + referrer);
+        redirectToBypass('Invalid referrer detected');
+    }
+}
+
+function detectAutomation() {
+    if (navigator.webdriver || 
+        window.phantom || 
+        window.callPhantom ||
+        window._phantom ||
+        window.Buffer ||
+        window.emit ||
+        window.spawn) {
+        logSecurityEvent('Automation detected');
+        handleSecurityViolation('automation');
+    }
+    
+    let mouseEvents = 0;
+    document.addEventListener('mousemove', () => {
+        mouseEvents++;
+    });
+    
+    setTimeout(() => {
+        if (mouseEvents === 0) {
+            logSecurityEvent('No mouse activity detected');
+            securityState.suspiciousActivity = true;
+        }
+    }, 5000);
+}
+
+function validateSession() {
     const sessionData = localStorage.getItem('eventSession');
     if (sessionData) {
         try {
             const session = JSON.parse(sessionData);
-            if (session.created && Date.now() - session.created < 300000) { // 5 minutes
-                isValidAccess = true;
+            if (Date.now() - session.created > SECURITY_CONFIG.sessionTimeout) {
+                localStorage.removeItem('eventSession');
+                logSecurityEvent('Session expired');
             }
         } catch (e) {
-            // Invalid session data
-        }
-    }
-    
-    // Redirect to bypass if direct access detected
-    if (!isValidAccess) {
-        logSecurityEvent('Direct access to redirect page detected - Referrer: ' + (referrer || 'None'));
-        localStorage.setItem('bypassReason', 'Direct access detected. Please use the proper verification process.');
-        setTimeout(() => {
-            window.location.href = 'bypass.html';
-        }, 2000);
-        return false;
-    }
-    
-    logSecurityEvent('Valid access to redirect page - Referrer: ' + referrer);
-    return true;
-}
-
-// Check for token in URL (from LootLabs redirect)
-function checkUrlToken() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const token = urlParams.get('token');
-    
-    if (token) {
-        // Auto-fill the token input
-        const tokenInput = document.getElementById('accessToken');
-        if (tokenInput) {
-            tokenInput.value = token.toUpperCase();
-            // Auto-validate after a short delay
-            setTimeout(() => {
-                validateAccessToken();
-            }, 1000);
+            localStorage.removeItem('eventSession');
+            logSecurityEvent('Invalid session data');
         }
     }
 }
@@ -120,21 +142,45 @@ function generateSessionId() {
 }
 
 function logSecurityEvent(event) {
-    console.log(`[SECURITY] 2025-08-08 10:02:07: ${event}`);
+    console.log(`[SECURITY] ${new Date().toISOString()}: ${event}`);
     
-    // Store events for debugging
     const events = JSON.parse(localStorage.getItem('securityEvents') || '[]');
     events.push({
-        timestamp: '2025-08-08 10:02:07',
+        timestamp: new Date().toISOString(),
         event: event,
+        userAgent: navigator.userAgent,
         url: window.location.href
     });
     
-    if (events.length > 20) {
-        events.splice(0, events.length - 20);
+    if (events.length > 50) {
+        events.splice(0, events.length - 50);
     }
     
     localStorage.setItem('securityEvents', JSON.stringify(events));
+}
+
+function handleSecurityViolation(type) {
+    securityState.suspiciousActivity = true;
+    
+    switch (type) {
+        case 'devtools':
+            if (Math.random() > 0.7) {
+                redirectToBypass('DevTools usage detected');
+            }
+            break;
+        case 'automation':
+            redirectToBypass('Automated access detected');
+            break;
+        case 'referrer':
+            redirectToBypass('Invalid access method');
+            break;
+    }
+}
+
+function redirectToBypass(reason) {
+    logSecurityEvent('Redirecting to bypass page: ' + reason);
+    localStorage.setItem('bypassReason', reason);
+    window.location.href = 'bypass.html';
 }
 
 // Page-specific Logic
@@ -172,7 +218,12 @@ function initializeIndexPage() {
                 this.style.transform = '';
             }, 150);
             
-            // Create session for validation
+            if (securityState.suspiciousActivity) {
+                redirectToBypass('Suspicious activity detected');
+                return;
+            }
+            
+            // Create session
             const sessionData = {
                 created: Date.now(),
                 sessionId: securityState.sessionId,
@@ -186,10 +237,13 @@ function initializeIndexPage() {
             this.innerHTML = '<span>Opening Verification...</span>';
             this.disabled = true;
             
-            // Redirect to LootLabs
+            // Open LootLabs in new tab
+            window.open(SECURITY_CONFIG.lootlabsUrl, '_blank');
+            
+            // Redirect to verification page
             setTimeout(() => {
-                window.location.href = SECURITY_CONFIG.lootlabsUrl;
-            }, 1500);
+                window.location.href = 'redirect.html';
+            }, 2000);
         });
     }
 }
@@ -212,6 +266,7 @@ function initializeRedirectPage() {
         });
         
         tokenInput.addEventListener('input', function() {
+            // Clear any error states when user starts typing
             const errorSection = document.getElementById('errorSection');
             if (errorSection && !errorSection.classList.contains('hidden')) {
                 errorSection.classList.add('hidden');
@@ -224,6 +279,7 @@ function initializeRedirectPage() {
             const link = this.getAttribute('data-link');
             if (link && link !== '') {
                 logSecurityEvent('User accessed event');
+                // Add click animation
                 this.style.transform = 'scale(0.98)';
                 setTimeout(() => {
                     this.style.transform = '';
@@ -233,6 +289,7 @@ function initializeRedirectPage() {
         });
     }
     
+    // Auto-focus token input
     if (tokenInput) {
         setTimeout(() => tokenInput.focus(), 500);
     }
@@ -249,13 +306,11 @@ function validateAccessToken() {
         return;
     }
     
+    // Check attempts
     securityState.attempts++;
     if (securityState.attempts > SECURITY_CONFIG.maxAttempts) {
-        logSecurityEvent('Too many attempts - redirecting to bypass');
-        localStorage.setItem('bypassReason', 'Too many failed verification attempts.');
-        setTimeout(() => {
-            window.location.href = 'bypass.html';
-        }, 2000);
+        logSecurityEvent('Too many validation attempts');
+        redirectToBypass('Too many failed attempts');
         return;
     }
     
@@ -268,6 +323,12 @@ function validateAccessToken() {
         } else {
             showError('Invalid token. Please check your token and try again.');
             logSecurityEvent('Invalid token attempt: ' + token);
+            
+            if (securityState.attempts >= SECURITY_CONFIG.maxAttempts) {
+                setTimeout(() => {
+                    redirectToBypass('Maximum attempts exceeded');
+                }, 2000);
+            }
         }
     }, 2000);
 }
@@ -309,7 +370,8 @@ function showSuccess(token) {
     }
     
     if (expiryTime) {
-        expiryTime.textContent = '2025-08-09 10:02:07 UTC';
+        const expiry = new Date(Date.now() + SECURITY_CONFIG.sessionTimeout);
+        expiryTime.textContent = expiry.toISOString().replace('T', ' ').split('.')[0] + ' UTC';
     }
     
     // Store successful validation
@@ -319,9 +381,8 @@ function showSuccess(token) {
     sessionData.validatedAt = Date.now();
     localStorage.setItem('eventSession', JSON.stringify(sessionData));
     
-    if (successSection) {
-        successSection.style.animation = 'successSlide 0.8s cubic-bezier(0.4, 0, 0.2, 1)';
-    }
+    // Add success animation
+    successSection.style.animation = 'successSlide 0.8s cubic-bezier(0.4, 0, 0.2, 1)';
 }
 
 function showError(message) {
@@ -389,6 +450,7 @@ function initializeBypassPage() {
     
     if (goHomeBtn) {
         goHomeBtn.addEventListener('click', function() {
+            // Add click animation
             this.style.transform = 'scale(0.98)';
             setTimeout(() => {
                 localStorage.clear();
@@ -399,6 +461,7 @@ function initializeBypassPage() {
     
     if (contactSupportBtn) {
         contactSupportBtn.addEventListener('click', function() {
+            // Add click animation
             this.style.transform = 'scale(0.98)';
             setTimeout(() => {
                 this.style.transform = '';
@@ -416,6 +479,7 @@ function initializeBypassPage() {
     }
     
     localStorage.removeItem('eventSession');
+    animateViolations();
 }
 
 function updateSessionInfo() {
@@ -425,7 +489,7 @@ function updateSessionInfo() {
     const userLoginEl = document.getElementById('userLogin');
     
     if (timestampEl) {
-        timestampEl.textContent = '2025-08-08 10:02:07 UTC';
+        timestampEl.textContent = '2025-08-08 10:19:42 UTC';
     }
     
     if (userAgentEl) {
@@ -449,10 +513,21 @@ function updateSessionInfo() {
     }
 }
 
+function animateViolations() {
+    const violations = document.querySelectorAll('.violation-list .step-card');
+    violations.forEach((violation, index) => {
+        setTimeout(() => {
+            violation.style.opacity = '1';
+            violation.style.transform = 'translateX(0)';
+        }, index * 200);
+    });
+}
+
 // Update timestamps throughout the site
 function updateTimestamps() {
-    const utcString = '2025-08-08 10:02:07 UTC';
+    const utcString = '2025-08-08 10:19:42 UTC';
     
+    // Update any timestamp elements
     const timestampElements = document.querySelectorAll('[id*="timestamp"], .timestamp');
     timestampElements.forEach(el => {
         if (el.textContent.includes('UTC') || el.textContent.includes('2025')) {
@@ -461,5 +536,262 @@ function updateTimestamps() {
     });
 }
 
+// Security Monitoring
+function startSecurityMonitoring() {
+    let clickCount = 0;
+    let rapidClicks = 0;
+    
+    document.addEventListener('click', function(e) {
+        clickCount++;
+        rapidClicks++;
+        
+        // Add click effect to buttons
+        if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+            const btn = e.target.tagName === 'BUTTON' ? e.target : e.target.closest('button');
+            btn.style.transform = 'scale(0.98)';
+            setTimeout(() => {
+                btn.style.transform = '';
+            }, 150);
+        }
+        
+        setTimeout(() => {
+            rapidClicks = 0;
+        }, 1000);
+        
+        if (rapidClicks > 10) {
+            logSecurityEvent('Rapid clicking detected');
+            securityState.suspiciousActivity = true;
+        }
+    });
+    
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            logSecurityEvent('Tab hidden');
+        } else {
+            logSecurityEvent('Tab visible');
+        }
+    });
+    
+    window.addEventListener('focus', function() {
+        logSecurityEvent('Window focused');
+    });
+    
+    window.addEventListener('blur', function() {
+        logSecurityEvent('Window blurred');
+    });
+    
+    setInterval(performSecurityCheck, 30000);
+}
+
+function performSecurityCheck() {
+    const scripts = document.querySelectorAll('script');
+    const expectedScripts = ['script.js'];
+    
+    scripts.forEach(script => {
+        if (script.src && !expectedScripts.some(expected => script.src.includes(expected))) {
+            logSecurityEvent('Unexpected script detected: ' + script.src);
+            handleSecurityViolation('script-injection');
+        }
+    });
+    
+    try {
+        const testData = localStorage.getItem('securityEvents');
+        if (testData) {
+            JSON.parse(testData);
+        }
+    } catch (e) {
+        logSecurityEvent('Local storage corruption detected');
+        localStorage.clear();
+    }
+}
+
+// Anti-debugging measures
+(() => {
+    let devtools = false;
+    let threshold = 160;
+    
+    function detectDevTools() {
+        if (window.outerHeight - window.innerHeight > threshold || 
+            window.outerWidth - window.innerWidth > threshold) {
+            devtools = true;
+        }
+    }
+    
+    function randomDelay() {
+        return Math.floor(Math.random() * 1000) + 500;
+    }
+    
+    setInterval(() => {
+        detectDevTools();
+        if (devtools && Math.random() > 0.8) {
+            if (window.location.pathname !== '/bypass.html') {
+                redirectToBypass('DevTools detected during monitoring');
+            }
+        }
+    }, randomDelay());
+})();
+
 // Initialize security logging
 logSecurityEvent('Security system initialized for user: SL1YYY');
+
+// Modal Functions
+function showTermsModal() {
+    const modalHTML = `
+        <div class="modal-overlay" id="termsModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 class="modal-title">📜 Terms of Service</h3>
+                    <button class="modal-close" onclick="closeModal('termsModal')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-section">
+                        <h4>🎯 Acceptance of Terms</h4>
+                        <p>By using this Event Access Portal, you agree to these terms and all applicable laws.</p>
+                    </div>
+                    
+                    <div class="modal-section">
+                        <h4>🔐 Verification Process</h4>
+                        <ul>
+                            <li>Complete verification through authorized partners</li>
+                            <li>Access tokens are single-use and expire after 24 hours</li>
+                            <li>Sharing tokens is strictly prohibited</li>
+                            <li>Multiple failed attempts may result in restrictions</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="modal-section">
+                        <h4>🚫 Prohibited Activities</h4>
+                        <ul>
+                            <li>Bypassing verification systems</li>
+                            <li>Using automated tools or bots</li>
+                            <li>Tampering with security measures</li>
+                            <li>Sharing credentials with unauthorized users</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="modal-section">
+                        <h4>🎮 Event Access</h4>
+                        <ul>
+                            <li>Access granted at our discretion</li>
+                            <li>Events may be limited by time or capacity</li>
+                            <li>We reserve the right to modify events</li>
+                            <li>No guarantee of specific outcomes</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="modal-section">
+                        <h4>📞 Contact</h4>
+                        <p>Questions? Contact us on <a href="https://discord.gg/dyGvnnymbHj" target="_blank">Discord</a>.</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeModal('termsModal')">Got it!</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    setTimeout(() => {
+        document.getElementById('termsModal').classList.add('active');
+    }, 10);
+}
+
+function showPrivacyModal() {
+    const modalHTML = `
+        <div class="modal-overlay" id="privacyModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 class="modal-title">🔒 Privacy Policy</h3>
+                    <button class="modal-close" onclick="closeModal('privacyModal')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-section">
+                        <h4>🎯 Information We Collect</h4>
+                        <ul>
+                            <li><strong>Verification Tokens:</strong> Used solely to verify task completion</li>
+                            <li><strong>Session Data:</strong> Temporary data to maintain verification status</li>
+                            <li><strong>Timestamps:</strong> For token expiration and abuse prevention</li>
+                            <li><strong>Browser Info:</strong> Basic technical data for security</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="modal-section">
+                        <h4>🛡️ How We Use Your Information</h4>
+                        <ul>
+                            <li>Tokens verify completion of verification tasks</li>
+                            <li>Session data ensures smooth user experience</li>
+                            <li>Timestamps prevent token abuse and expiration</li>
+                            <li>Browser info helps detect security threats</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="modal-section">
+                        <h4>🔐 Data Protection</h4>
+                        <ul>
+                            <li><strong>We DO NOT collect personal information</strong></li>
+                            <li>No usernames, emails, or personal data stored</li>
+                            <li>All data is temporary and automatically deleted</li>
+                            <li>Tokens are hashed for security</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="modal-section">
+                        <h4>⏰ Data Retention</h4>
+                        <ul>
+                            <li>Session data: Deleted after 24 hours</li>
+                            <li>Security logs: Kept locally, cleared regularly</li>
+                            <li>Tokens: Single-use and immediately invalidated</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="modal-section">
+                        <h4>📞 Questions?</h4>
+                        <p>Contact us on <a href="https://discord.gg/dyGvnnymbHj" target="_blank">Discord</a> for privacy concerns.</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeModal('privacyModal')">Understood!</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    setTimeout(() => {
+        document.getElementById('privacyModal').classList.add('active');
+    }, 10);
+}
+
+function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.remove('active');
+        setTimeout(() => {
+            modal.remove();
+        }, 300);
+    }
+}
+
+// Fix terms and privacy links
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(() => {
+        const links = document.querySelectorAll('a[href="#"]');
+        links.forEach(link => {
+            const text = link.textContent.toLowerCase();
+            if (text.includes('terms')) {
+                link.onclick = function(e) {
+                    e.preventDefault();
+                    showTermsModal();
+                    return false;
+                };
+            } else if (text.includes('privacy')) {
+                link.onclick = function(e) {
+                    e.preventDefault();
+                    showPrivacyModal();
+                    return false;
+                };
+            }
+        });
+    }, 500);
+});
